@@ -39,7 +39,7 @@ Make sure the following tools are installed:
 
 - [Kustomize](https://kubectl.docs.kubernetes.io/installation/kustomize/)
 - [kubectl](https://kubernetes.io/docs/tasks/tools/)
-- (Optional) Docker, AWS CLI, eksctl — if deploying to cloud
+- Docker, AWS CLI, eksctl — if deploying to cloud
 - Text Editor: Recommended **VS Code** with **YAML & Kubernetes extensions**
 
 
@@ -123,15 +123,20 @@ kind: Kustomization
 resources:
 - deployment.yaml
 - service.yaml
-configMapGenerator:
-- name: nginx-config
-  literals:
-  - welcome_message=Hello from Nginx!
-secretGenerator:
-- name: nginx-secret
-  literals:
-  - password=superSecret123
 ```
+
+
+## Create a `configs/index.html` file in `base`:
+```bash
+touch base/configs/index.html
+```
+
+#### Paste
+```
+<html><body><h1>Hello from Nginx!</h1></body></html>
+```
+
+
 
 ## Step 2: Set Up Overlays for Different Environments
 
@@ -140,7 +145,7 @@ secretGenerator:
 mkdir -p overlays/dev overlays/staging overlays/prod
 ```
 
-### Set up the dev environment:
+### Step 2.2: Set up the dev environment:
 - Create kustomization.yaml in `overlays/dev`:
 ```bash
 touch overlays/dev/kustomization.yaml
@@ -154,10 +159,10 @@ kind: Kustomization
 resources:
 - ../../base
 - configmap.yaml
-- service.yaml
 patches:
 - path: replica_count.yaml
-namePrefix: dev-
+- path: label-patch.yaml
+namePrefix: prod-
 ```
 
 ## Create `replica_count.yaml` in `overlays/dev`:
@@ -172,7 +177,7 @@ kind: Deployment
 metadata:
   name: nginx-deployment
 spec:
-  replicas: 1
+  replicas: 3
   template:
     spec:
       containers:
@@ -183,7 +188,7 @@ spec:
       volumes:
       - name: nginx-config
         configMap:
-          name: dev-specific-nginx-config
+          name: prod-specific-nginx-config
 ```
 
 
@@ -227,7 +232,7 @@ data:
 
 
 
-## Set up the staging environment:
+## Step 3: Set up the staging environment:
 
 - Create `kustomization.yaml` in `overlays/staging`:
 ```bash
@@ -238,10 +243,13 @@ touch overlays/staging/kustomization.yaml
 ```bash
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-bases:
+resources:
 - ../../base
-patchesStrategicMerge:
-- replica_count.yaml
+- configmap.yaml
+- service.yaml
+patches:
+- path: replica_count.yaml
+namePrefix: staging-
 ```
 
 
@@ -258,10 +266,61 @@ metadata:
   name: nginx-deployment
 spec:
   replicas: 2
+  template:
+    spec:
+      containers:
+      - name: nginx
+        volumeMounts:
+        - name: nginx-config
+          mountPath: /usr/share/nginx/html
+      volumes:
+      - name: nginx-config
+        configMap:
+          name: staging-specific-nginx-config
 ```
 
 
-## Set up the `prod` environment:
+## Create `service.yaml` in `overlays/staging`:
+```bash
+touch overlays/staging/service.yaml
+```
+
+#### Paste this to `service.yaml`:
+```bash
+apiVersion: v1
+kind: Service
+metadata:
+  name: staging-nginx-service
+spec:
+  selector:
+    app: nginx
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+```
+
+
+## Create `configmap.yaml` in `overlays/staging`:
+```bash
+touch overlays/staging/configmap.yaml
+```
+
+#### Paste this to `configmap.yaml`:
+```bash
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: staging-specific-nginx-config
+data:
+  index.html: |
+    <html><body><h1>Welcome to Dev/Staging Castle!</h1></body></html>
+```
+
+
+
+
+## Step 4: Set up the `prod` environment:
 - Create `kustomization.yaml` in `overlays/prod`:
 
 ```bash
@@ -272,12 +331,12 @@ touch overlays/prod/kustomization.yaml
 ```bash
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-bases:
+resources:
 - ../../base
-patchesStrategicMerge:
-- replica_count.yaml
-commonLabels:
-  env: production
+- configmap.yaml
+patches:
+- path: replica_count.yaml
+- path: label-patch.yaml
 namePrefix: prod-
 ```
 
@@ -294,66 +353,110 @@ metadata:
   name: nginx-deployment
 spec:
   replicas: 3
+  template:
+    spec:
+      containers:
+      - name: nginx
+        volumeMounts:
+        - name: nginx-config
+          mountPath: /usr/share/nginx/html
+      volumes:
+      - name: nginx-config
+        configMap:
+          name: prod-specific-nginx-config
 ```
 
 
-## Step 3: Use Transformers and Generators
-### 3.1: Add a ConfigMap to the base:
+
+## Create `configmap.yaml` in `overlays/prod`:
+```bash
+touch overlays/prod/configmap.yaml
+```
+
+#### Paste this to `configmap.yaml`:
+```bash
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prod-specific-nginx-config
+data:
+  index.html: |
+    <html><body><h1>Welcome to Prod Castle!</h1></body></html>
+```
+
+
+## Create `label-patch.yaml` in `overlays/prod`:
+```bash
+touch overlays/prod/label-patch.yaml
+```
+
+#### Paste this to `label-patch.yaml`:
+```bash
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+spec:
+  template:
+    metadata:
+      labels:
+        env: production
+```
+
+
+## Step 5: Use Transformers and Generators
+### 5.1: Add a ConfigMap to the base:
 
 - Open and Update `base/kustomization.yaml`:
 ```bash
 configMapGenerator:
 - name: nginx-config
-  literals:
-  - welcome_message=Hello from Nginx!
+  files:
+  - index.html=configs/index.html
 ```
 
-### 3.2: Update the prod overlay to use transformers:
+### 5.2: Update the prod overlay to use transformers:
 
 - Make sure `overlays/prod/kustomization.yaml` has:
 ```bash
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-bases:
+resources:
 - ../../base
-patchesStrategicMerge:
-- replica_count.yaml
-commonLabels:
-  env: production
+- configmap.yaml
+patches:
+- path: replica_count.yaml
+- path: label-patch.yaml
 namePrefix: prod-
 ```
 
-## Step 4: Manage Secrets Safely
+## Step 6: Manage Secrets Safely
 - Add a Secret to the base:
 
 #### Open and Update `base/kustomization.yaml`:
 ```bash
 secretGenerator:
-  - name: nginx-secret
-    literals:
-    - password=superSecret123
+- name: nginx-secret
+  literals:
+  - password=superSecret123
 ```
 
-## Step 4.2: Update the deployment` to use the secret:
+## Step 6.2: Update the deployment` to use the secret:
 #### Update `base/deployment.yaml`
 ```bash
-env:
-      - name: SECRET_PASSWORD
-        valueFrom:
-          secretKeyRef:
-            name: nginx-secret
-            key: password
-      - name: WELCOME_MESSAGE
-        valueFrom:
-          configMapRef:
-            name: nginx-config
-            key: welcome_message
+        volumeMounts:
+        - name: nginx-config
+          mountPath: /usr/share/nginx/html
+      volumes:
+      - name: nginx-config
+        configMap:
+          name: nginx-config
 ```
 
 
 
 
-## Step 5: Test Your Setup
+## Step 7: Test Your Setup
 
 #### Verify Installations:
 ```bash
@@ -460,7 +563,7 @@ kubectl get pods -n default
 mkdir -p configmap
 ```
 
-### Create configmap/nginx-config.yaml (for dev and staging)
+### Create `configmap/nginx-config.yaml` for `dev`
 ```bash
 cat << 'EOF' > configmap/nginx-config.yaml
 apiVersion: v1
