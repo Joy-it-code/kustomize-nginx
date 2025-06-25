@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prod-specific-nginx-config
+data:
+  index.html: |
+    <html><body><h1>Welcome to Prod Castle!</h1></body></html>

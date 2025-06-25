@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: staging-specific-nginx-config
+data:
+  index.html: |
+    <html><body><h1>Welcome to Dev/Staging Castle!</h1></body></html>
